@@ -1,0 +1,3 @@
+PySide6-Essentials>=6.5   # 只需 QtCore/QtGui/QtWidgets；已安装完整版 PySide6 也可直接使用
+requests>=2.31
+cryptography>=41.0

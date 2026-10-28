@@ -20,10 +20,30 @@ from .security import Invalid, validate_and_prepare_url
 H = "https://demo.ysc-helper.example"
 
 
-def _single(name: str, n_sites: int, spider: str = "https://demo.ysc-helper.example/jar/spider.jar") -> dict:
-    return {"spider": spider, "name": name,
-            "sites": [{"key": f"s{i}", "name": f"{name}-站点{i}", "type": 3, "api": "csp_Demo"} for i in range(n_sites)],
-            "lives": [], "parses": []}
+def _single(name: str, n_sites: int, spider: str = "https://demo.ysc-helper.example/jar/spider.jar",
+            slug: str = "", ext_rule_path: str = "") -> dict:
+    """演示单仓：大多数是 jar 爬虫站（csp_*），另含 MacCMS 采集站与 XBPQ 规则站（可导入全剧视界）。"""
+    sites: list = []
+    if slug:
+        sites += [
+            {"key": f"{slug}_cj", "name": f"{name}·资源采集", "type": 1,
+             "api": f"https://{slug}.cj.example/api.php/provide/vod/", "searchable": 1},
+            {"key": f"{slug}_xml", "name": f"{name}·XML采集", "type": 0,
+             "api": f"https://{slug}-xml.cj.example/api.php/provide/vod/at/xml/"},
+            {"key": "shared_cj", "name": "公共采集站", "type": 1,
+             "api": "https://shared.cj.example/api.php/provide/vod/?ac=list"},
+            {"key": f"{slug}_xbpq", "name": f"🔥{name}·XBPQ", "type": 3, "api": "csp_XBPQ",
+             "ext": {"主页url": f"https://www.{slug}-ys.example/", "分类url": f"https://www.{slug}-ys.example/vodshow/{{cateId}}--------{{catePg}}---.html",
+                     "数组": "class=\"module-item\"&&</a>", "播放数组": "class=\"module-play-list\"&&</div>"}},
+            {"key": f"{slug}_drpy", "name": f"{name}·drpy", "type": 3, "api": "./lib/drpy2.min.js", "ext": "./js/x.js"},
+        ]
+        if ext_rule_path:
+            sites.append({"key": f"{slug}_xbpq2", "name": f"{name}·外链规则", "type": 3, "api": "csp_XBPQ",
+                          "ext": ext_rule_path})
+    sites += [{"key": f"s{i}", "name": f"{name}-站点{i}", "type": 3, "api": "csp_Demo"}
+              for i in range(max(0, n_sites - len(sites)))]
+    return {"spider": spider, "name": name, "sites": sites,
+            "lives": [{"name": "直播", "url": f"{H}/live.txt"}], "parses": []}
 
 
 def build_demo_routes() -> Dict[str, Tuple[int, bytes, int]]:
@@ -37,7 +57,9 @@ def build_demo_routes() -> Dict[str, Tuple[int, bytes, int]]:
             body = body.encode("utf-8")
         routes[f"{H}{path}"] = (status, body, delay)
 
-    put("/fty/tv.json", _single("饭太硬(演示)", 42), delay=180)
+    put("/fty/tv.json", _single("饭太硬(演示)", 42, slug="fty", ext_rule_path="./xbpq/movie.json"), delay=180)
+    put("/fty/xbpq/movie.json", {"主页url": "https://movie.fty-ys.example", "搜索url": "https://movie.fty-ys.example/search/{wd}.html",
+                                 "数组": "<li&&</li>", "标题": "title=\"&&\""}, delay=90)
     put("/fm/api.json", """
         /* 肥猫风格：带块注释、行注释与尾随逗号 */
         {
@@ -48,12 +70,12 @@ def build_demo_routes() -> Dict[str, Tuple[int, bytes, int]]:
           ],
         }
     """, delay=420)
-    stego_json = json.dumps(_single("摸鱼儿(隐写)", 18), ensure_ascii=False).encode("utf-8")
+    stego_json = json.dumps(_single("摸鱼儿(隐写)", 18, slug="myer"), ensure_ascii=False).encode("utf-8")
     put("/myer/cover.png", b"\x89PNG\r\n\x1a\n" + bytes(random.Random(1).randrange(256) for _ in range(256))
         .replace(b"**", b"*_") + b"**" + base64.b64encode(stego_json), delay=650)
-    aes_plain = json.dumps(_single("蚂蚁线路(AES)", 25), ensure_ascii=False)
+    aes_plain = json.dumps(_single("蚂蚁线路(AES)", 25, slug="mayi"), ensure_ascii=False)
     put("/mayi/0110.txt", encrypt_catvod_aes_hex(aes_plain, "ysc-demo-key", "1700000000000"), delay=900)
-    put("/duo/dm.txt", base64.b64encode(json.dumps(_single("多多(Base64)", 12), ensure_ascii=False).encode()),
+    put("/duo/dm.txt", base64.b64encode(json.dumps(_single("多多(Base64)", 12, slug="duo"), ensure_ascii=False).encode()),
         delay=300)
     put("/slow/tv.json", _single("慢速线路", 6), delay=2300)
     put("/broken/404.json", "Not Found", status=404, delay=90)

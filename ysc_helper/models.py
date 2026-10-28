@@ -101,6 +101,9 @@ class RepoNode:
     depth: int = 0
     error: str = ""
     children: List["RepoNode"] = field(default_factory=list)
+    # 全剧视界导出：单仓内可导入的站点候选（None = 旧快照/未解析，无明细）
+    quanju_sites: Optional[List[Dict[str, Any]]] = None
+    quanju_skipped: Dict[str, int] = field(default_factory=dict)
 
     @property
     def available_child_count(self) -> int:
@@ -113,6 +116,13 @@ class RepoNode:
 
     # ---- 序列化（快照持久化用）----
     def to_dict(self) -> Dict[str, Any]:
+        d = self._base_dict()
+        if self.quanju_sites is not None:
+            d["quanjuSites"] = self.quanju_sites
+            d["quanjuSkipped"] = dict(self.quanju_skipped)
+        return d
+
+    def _base_dict(self) -> Dict[str, Any]:
         return {
             "id": self.id, "name": self.name, "url": self.url,
             "normalizedUrl": self.normalized_url, "kind": self.kind.name,
@@ -145,6 +155,9 @@ class RepoNode:
             is_shared_ref=bool(d.get("isSharedRef", False)), depth=int(d.get("depth") or 0),
             error=str(d.get("error", "")),
             children=[RepoNode.from_dict(c) for c in d.get("children", [])],
+            quanju_sites=list(d["quanjuSites"]) if isinstance(d.get("quanjuSites"), list) else None,
+            quanju_skipped={str(k): int(v) for k, v in (d.get("quanjuSkipped") or {}).items()
+                            if isinstance(v, (int, float))},
         )
 
 

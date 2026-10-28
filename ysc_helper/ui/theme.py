@@ -65,6 +65,11 @@ def stylesheet(p: Palette) -> str:
     QPushButton#LinkDanger {{ border: none; background: transparent; color: {STATUS_BAD_RED}; padding: 4px 6px; }}
     QLineEdit {{ background: {p.surface}; border: 1px solid {p.border}; border-radius: 10px; padding: 7px 10px; }}
     QLineEdit:focus {{ border-color: {p.primary}; }}
+    QComboBox {{ background: {p.surface}; border: 1px solid {p.border}; border-radius: 10px; padding: 6px 10px;
+                 min-width: 150px; }}
+    QComboBox:focus {{ border-color: {p.primary}; }}
+    QComboBox QAbstractItemView {{ background: {p.surface}; border: 1px solid {p.border};
+                 selection-background-color: {"#1E3A8A" if p.dark else "#DBEAFE"}; color: {p.on_surface}; }}
     QProgressBar {{ background: {p.surface_variant}; border: none; border-radius: 4px; height: 9px; }}
     QProgressBar::chunk {{ background: {p.primary}; border-radius: 4px; }}
     QTreeWidget, QTableWidget, QListWidget {{ background: {p.surface}; alternate-background-color: {p.surface_variant};

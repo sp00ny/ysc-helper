@@ -13,6 +13,7 @@ from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Signal
 from ..data.repository import PersistedSnapshot, RepoScanRepository
 from ..engine.probe_engine import MultiThreadProbeEngine, PipelineOutput, ScanCancelled
 from ..engine.thread_pool_manager import ThreadPoolManager
+from ..export import QuanjuExportReport, build_quanju_export, format_quanju_json
 from ..models import (ExportedUrlsConfig, FilterState, ProbeSettings, RepoNode, ScanProgress, ScanStage,
                       ScanStatistics, SeedLine, ThreadPoolTelemetry)
 from ..security import Invalid, set_allow_fake_ip, validate_and_prepare_url
@@ -99,6 +100,7 @@ class AppController(QObject):
         self.progress = ScanProgress()
         self.is_running = False
         self.filter_state = FilterState()
+        self.last_quanju_report: Optional[QuanjuExportReport] = None
         self.pool = QThreadPool.globalInstance()
 
         self._scan_signals = _Signals()
@@ -266,34 +268,80 @@ class AppController(QObject):
         self._run_bg(lambda: self.repository.delete_history_by_id(hid), done)
 
     # ---------------- 导出 ----------------
+    EXPORT_TVBOX = "tvbox"    # 影视仓 / TVBox 多仓 {"urls":[...]}
+    EXPORT_QUANJU = "quanju"  # 全剧视界 自定义源 {"format":"duanju-custom-sources",...}
+
+    def has_exportable(self) -> bool:
+        return bool(self.exported_config and self.exported_config.urls)
+
     def export_json_or_none(self) -> Optional[str]:
         cfg = self.exported_config
         if cfg is None or not cfg.urls:
             return None
         return self.repository.format_export_config_json(cfg)
 
-    def write_export_to_file(self, path: str) -> None:
-        text = self.export_json_or_none()
-        if text is None:
-            self.toast.emit("暂无可导出的可用单仓配置")
+    def _fetch_ext_rule_text(self, url: str) -> Optional[str]:
+        """抓取 XBPQ 外链规则文件：复用带 SSRF/DNS 重绑定防护、4MB 上限的探测客户端。"""
+        s = self.settings
+        out = self.http.fetch(url, s.connect_timeout_ms, s.read_timeout_ms, https_only=s.https_only)
+        if not out.ok or not out.body_bytes:
+            return None
+        raw = out.body_bytes
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return raw.decode("gb18030", errors="replace")
+
+    def build_quanju_now(self) -> "tuple[Optional[str], QuanjuExportReport]":
+        """同步构建全剧视界 JSON（在后台线程调用）；没有可导入站点时文本为 None。"""
+        if not self.is_running and getattr(self.http, "cancelled", False):
+            self.http.reset_cancel()
+        payload, report = build_quanju_export(self.roots, fetch_text=self._fetch_ext_rule_text)
+        return (format_quanju_json(payload) if payload["count"] else None), report
+
+    def build_export_async(self, fmt: str, on_ready: Callable[[Optional[str], str], None]) -> None:
+        """按格式生成导出文本；回调 (text 或 None, 摘要) 总在 UI 线程执行。"""
+        if fmt == self.EXPORT_QUANJU:
+            if not self.has_exportable():
+                on_ready(None, "暂无可导出的可用单仓配置")
+                return
+
+            def done(v: object) -> None:
+                text, report = v  # type: ignore[misc]
+                self.last_quanju_report = report
+                on_ready(text, report.summary_text() if text else
+                         "没有可导入全剧视界的站点：" + report.summary_text())
+            self._run_bg(self.build_quanju_now, done)
             return
+        text = self.export_json_or_none()
         n = len(self.exported_config.urls) if self.exported_config else 0
+        on_ready(text, f"{n} 条可用源" if text else "暂无可导出的可用单仓配置")
 
-        def write() -> object:
-            try:
-                with open(path, "w", encoding="utf-8") as fh:
-                    fh.write(text)
-                return None
-            except OSError as e:
-                return str(e)
+    def write_export_to_file(self, path: str, fmt: str = EXPORT_TVBOX) -> None:
+        def ready(text: Optional[str], summary: str) -> None:
+            if text is None:
+                self.toast.emit(summary)
+                return
 
-        def done(err: object) -> None:
-            if err:
-                self.toast.emit(f"保存失败：{err}")
-            else:
-                self.toast.emit(f"配置已成功保存 ({n} 条可用源)")
+            def write() -> object:
+                try:
+                    with open(path, "w", encoding="utf-8") as fh:
+                        fh.write(text)
+                    return None
+                except OSError as e:
+                    return str(e)
 
-        self._run_bg(write, done)
+            def done(err: object) -> None:
+                if err:
+                    self.toast.emit(f"保存失败：{err}")
+                elif fmt == self.EXPORT_QUANJU:
+                    self.toast.emit(f"已保存全剧视界导入文件。{summary}")
+                else:
+                    self.toast.emit(f"配置已成功保存 ({summary})")
+
+            self._run_bg(write, done)
+
+        self.build_export_async(fmt, ready)
 
     def shutdown(self) -> None:
         self.engine.cancel()

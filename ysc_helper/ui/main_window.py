@@ -63,7 +63,7 @@ class MainWindow(QMainWindow):
         v.addWidget(self.tabs, 1)
         self.setCentralWidget(root)
 
-        controller.toast.connect(lambda m: self.statusBar().showMessage(m, 4000))
+        controller.toast.connect(lambda m: self.statusBar().showMessage(m, max(4000, 90 * len(m))))
         controller.switch_tab.connect(self.tabs.setCurrentIndex)
         self.statusBar().showMessage("就绪")
         self.apply_theme(dark)

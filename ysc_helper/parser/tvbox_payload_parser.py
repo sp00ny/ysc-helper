@@ -27,6 +27,9 @@ class ParsedRepoPayload:
     site_count: int
     has_cleartext_spider_jar: bool
     sub_entries: List[SeedLine] = field(default_factory=list)
+    # 全剧视界导出用：可导入站点候选与跳过计数（仅单仓）
+    quanju_sites: Optional[List[Dict[str, Any]]] = None
+    quanju_skipped: Dict[str, int] = field(default_factory=dict)
 
 
 def parse_payload(raw_bytes: bytes) -> Optional[ParsedRepoPayload]:
@@ -152,9 +155,15 @@ def _classify(obj: Dict[str, Any], fmt: PayloadFormat) -> ParsedRepoPayload:
     sites = obj.get("sites")
     site_count = len(sites) if isinstance(sites, list) else 0
     spider = _prim_str(obj.get("spider")).strip()
+    qj_sites: Optional[List[Dict[str, Any]]] = None
+    qj_skipped: Dict[str, int] = {}
+    if kind == RepoKind.SINGLE:
+        from ..export.quanju import extract_quanju_sites
+        qj_sites, qj_skipped = extract_quanju_sites(obj)
     return ParsedRepoPayload(
         kind=kind, format=fmt, name=repo_name, site_count=site_count,
         has_cleartext_spider_jar=spider.lower().startswith("http://"), sub_entries=subs,
+        quanju_sites=qj_sites, quanju_skipped=qj_skipped,
     )
 
 

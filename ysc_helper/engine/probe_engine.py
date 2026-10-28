@@ -64,6 +64,8 @@ class _SFResult:
     speed_kbps: Optional[float] = None
     security_flags: List[SecurityFlag] = field(default_factory=list)
     sub_entries: List[SeedLine] = field(default_factory=list)
+    quanju_sites: Optional[list] = None
+    quanju_skipped: Dict[str, int] = field(default_factory=dict)
     error: str = ""
 
 
@@ -210,7 +212,8 @@ class MultiThreadProbeEngine:
                 flags.append(SecurityFlag.CLEARTEXT_SPIDER_JAR)
             return _SFResult(ok=True, kind=parsed.kind, format=parsed.format, detected_name=parsed.name,
                              site_count=parsed.site_count, ttfb_ms=mt, total_ms=mtot, size_kb=first.size_kb,
-                             speed_kbps=speed, security_flags=flags, sub_entries=parsed.sub_entries)
+                             speed_kbps=speed, security_flags=flags, sub_entries=parsed.sub_entries,
+                             quanju_sites=parsed.quanju_sites, quanju_skipped=dict(parsed.quanju_skipped))
 
         def io_task(raw_url: str, fut: Future) -> None:
             try:
@@ -281,7 +284,8 @@ class MultiThreadProbeEngine:
                                 speed_grade=SpeedGrade.from_latency(True, res.total_ms), ttfb_ms=res.ttfb_ms,
                                 total_ms=res.total_ms, size_kb=res.size_kb, speed_kbps=res.speed_kbps,
                                 site_count=res.site_count, payload_format=res.format,
-                                security_flags=list(res.security_flags), is_shared_ref=from_cache, **common),
+                                security_flags=list(res.security_flags), is_shared_ref=from_cache,
+                                quanju_sites=res.quanju_sites, quanju_skipped=dict(res.quanju_skipped), **common),
                        seed.url, on_done)
                 return
             if depth >= settings.max_depth:

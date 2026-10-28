@@ -80,6 +80,9 @@ def _schedule_screenshot(app: QApplication, win, controller, path: Path) -> None
         shots["task"] = win.grab()
 
     def on_done() -> None:
+        if shots.get("done"):
+            return
+        shots["done"] = True
         def snap() -> None:
             win.result_tab.expand_or_collapse_all(True)
             app.processEvents()
@@ -88,7 +91,13 @@ def _schedule_screenshot(app: QApplication, win, controller, path: Path) -> None
                 shots["task"].save(str(path.with_name(path.stem + "_task" + path.suffix)))
             print(f"screenshot saved: {path}")
             app.quit()
-        QTimer.singleShot(400, snap)
+
+        def preview_quanju() -> None:
+            # 截图展示「全剧视界」导出格式及其统计摘要
+            tab = win.result_tab
+            tab.format_combo.setCurrentIndex(1)
+            tab.preview_export(lambda _t, _s: QTimer.singleShot(200, snap))
+        QTimer.singleShot(400, preview_quanju)
 
     controller.results_changed.connect(lambda: controller.is_running is False and controller.roots and on_done())
     QTimer.singleShot(300, lambda: controller.start_scan(only_custom=False))

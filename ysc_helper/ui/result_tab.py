@@ -9,7 +9,7 @@ from typing import Optional, Set
 
 from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtGui import QBrush, QColor, QFont, QGuiApplication, QKeySequence, QShortcut
-from PySide6.QtWidgets import (QFileDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMenu, QPushButton,
+from PySide6.QtWidgets import (QComboBox, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMenu, QPushButton,
                                QStackedWidget, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from ..models import FilterState, PayloadFormat, RepoKind, RepoNode, SecurityFlag, SpeedGrade
@@ -90,6 +90,18 @@ class ResultTab(QWidget):
         ops.addWidget(b_exp)
         ops.addWidget(b_col)
         ops.addStretch(1)
+        ops.addWidget(muted("导出格式"))
+        self.format_combo = QComboBox()
+        self.format_combo.setObjectName("ExportFormat")
+        self.format_combo.addItem("影视仓 / TVBox 多仓", AppController.EXPORT_TVBOX)
+        self.format_combo.addItem("全剧视界 自定义源", AppController.EXPORT_QUANJU)
+        self.format_combo.setItemData(0, "{\"urls\":[{name,url}]} —— 影视仓/TVBox「多仓」直接加载", Qt.ToolTipRole)
+        self.format_combo.setItemData(
+            1, "{\"format\":\"duanju-custom-sources\",...} —— 全剧视界「自定义源 → 导入（文件）」\n"
+               "仅包含 MacCMS 采集接口站与 XBPQ 规则站；jar/JS 爬虫站点无法在全剧视界运行，会被跳过", Qt.ToolTipRole)
+        self.format_combo.setToolTip("选择「复制JSON」与「导出配置」使用的格式")
+        self.format_combo.currentIndexChanged.connect(self._on_format_changed)
+        ops.addWidget(self.format_combo)
         self.copy_btn = QPushButton("⧉ 复制JSON")
         self.copy_btn.clicked.connect(self._copy_json)
         self.export_btn = QPushButton("⤓ 导出配置")
@@ -98,6 +110,10 @@ class ResultTab(QWidget):
         ops.addWidget(self.copy_btn)
         ops.addWidget(self.export_btn)
         lay.addLayout(ops)
+        self.export_hint = muted("")
+        self.export_hint.setWordWrap(True)
+        self.export_hint.setVisible(False)
+        lay.addWidget(self.export_hint)
 
         # 5. 树形列表
         self.stack = QStackedWidget()
@@ -172,6 +188,7 @@ class ResultTab(QWidget):
         can_export = st.exportable_unique_count > 0
         self.copy_btn.setEnabled(can_export)
         self.export_btn.setEnabled(can_export)
+        self._on_format_changed()
         self._recompute()
 
     def _recompute(self) -> None:
@@ -333,17 +350,64 @@ class ResultTab(QWidget):
         QGuiApplication.clipboard().setText(text or "")
         self.c.toast.emit(msg)
 
+    # ---------------- 导出 ----------------
+    @property
+    def export_format(self) -> str:
+        return self.format_combo.currentData() or AppController.EXPORT_TVBOX
+
+    def _on_format_changed(self, _i: int = 0) -> None:
+        if self.export_format == AppController.EXPORT_QUANJU:
+            self.export_hint.setText("全剧视界：导出为「自定义源」导入文件（全剧视界 → 自定义源 → 导入 → 文件）。"
+                                     "仅收录 MacCMS 采集接口与 XBPQ 规则站点，jar/JS 爬虫站点会被跳过。")
+            self.export_hint.setVisible(True)
+        else:
+            self.export_hint.setVisible(False)
+
+    def _set_busy(self, busy: bool) -> None:
+        can = self.c.has_exportable() and not busy
+        self.copy_btn.setEnabled(can)
+        self.export_btn.setEnabled(can)
+
+    def _show_summary(self, summary: str) -> None:
+        if self.export_format == AppController.EXPORT_QUANJU:
+            self.export_hint.setText(summary)
+            self.export_hint.setVisible(True)
+
+    def preview_export(self, on_done=None) -> None:
+        """后台生成当前格式的导出内容，仅刷新摘要（截图/自检用）。"""
+        self._set_busy(True)
+
+        def ready(text, summary: str) -> None:
+            self._set_busy(False)
+            self._show_summary(summary)
+            if on_done:
+                on_done(text, summary)
+        self.c.build_export_async(self.export_format, ready)
+
     def _copy_json(self) -> None:
-        js = self.c.export_json_or_none()
-        if js is None:
-            self.c.toast.emit("暂无可导出的可用单仓配置")
-            return
-        self._copy_text(js, "已复制到剪贴板")
+        fmt = self.export_format
+        self._set_busy(True)
+
+        def ready(text, summary: str) -> None:
+            self._set_busy(False)
+            self._show_summary(summary)
+            if text is None:
+                self.c.toast.emit(summary)
+                return
+            label = "全剧视界导入 JSON" if fmt == AppController.EXPORT_QUANJU else "影视仓多仓 JSON"
+            self._copy_text(text, f"已复制{label}到剪贴板（{summary}）")
+        self.c.build_export_async(fmt, ready)
 
     def _export(self) -> None:
-        if self.c.export_json_or_none() is None:
+        if not self.c.has_exportable():
             self.c.toast.emit("暂无可导出的可用单仓配置")
             return
-        path, _ = QFileDialog.getSaveFileName(self, "导出配置", "ysc_config.json", "JSON 文件 (*.json)")
+        fmt = self.export_format
+        if fmt == AppController.EXPORT_QUANJU:
+            from ..export import quanju_default_filename
+            default, title = quanju_default_filename(), "导出全剧视界自定义源"
+        else:
+            default, title = "ysc_config.json", "导出影视仓配置"
+        path, _ = QFileDialog.getSaveFileName(self, title, default, "JSON 文件 (*.json)")
         if path:
-            self.c.write_export_to_file(path)
+            self.c.write_export_to_file(path, fmt)
